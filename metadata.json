@@ -1,0 +1,5 @@
+{
+  "name": "Smart Navigator",
+  "description": "A simple map application that allows users to click two points to generate a route and navigation instructions.",
+  "requestFramePermissions": ["geolocation"]
+}
