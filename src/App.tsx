@@ -596,52 +596,9 @@ export default function App() {
                 </div>
                 <div className="p-3 bg-orange-50/50 rounded-xl border border-orange-100/50">
                   <div className="flex items-center gap-2 text-orange-600/60 mb-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">最大坡度</span>
-                  </div>
-                  <p className="text-lg font-bold text-orange-700">{Math.abs(route.maxGrade).toFixed(1)}%</p>
-                </div>
-              </div>
+                   
 
-              {/* Elevation Chart */}
-              <div className="p-4 bg-stone-50 rounded-xl border border-stone-100">
-                <h3 className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-4">海拔剖面 (米)</h3>
-                <div className="h-32 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={route.elevations}>
-                      <defs>
-                        <linearGradient id="colorElev" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                      <XAxis 
-                        dataKey="distance" 
-                        hide 
-                      />
-                      <YAxis 
-                        hide 
-                        domain={['dataMin - 5', 'dataMax + 5']} 
-                      />
-                      <Tooltip 
-                        labelFormatter={(value) => `距离: ${value}m`}
-                        formatter={(value: any) => [`${value}m`, '海拔']}
-                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '10px' }}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="elevation" 
-                        stroke="#10b981" 
-                        fillOpacity={1} 
-                        fill="url(#colorElev)" 
-                        strokeWidth={2}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
+             
               <div className="space-y-2">
                 <h3 className="text-xs font-bold text-stone-400 uppercase tracking-widest px-1">导航步骤</h3>
                 <div className="space-y-1">
@@ -716,8 +673,8 @@ export default function App() {
           zoomControl={false}
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://amap.com/">高德地图</a>'
+            url="http://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
           />
           
           <MapEvents onMapClick={handleMapClick} />
