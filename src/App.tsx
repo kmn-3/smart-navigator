@@ -718,7 +718,6 @@ export default function App() {
           <TileLayer
             attribution='&copy; <a href="https://amap.com/">高德地图</a>'
             url="http://webrd0{1-4}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
-
           />
           
           <MapEvents onMapClick={handleMapClick} />
