@@ -45,7 +45,6 @@ interface RouteData {
   calories: number;
   co2Saved: number;
   elevations: { distance: number; elevation: number }[];
-  maxGrade: number;
 }
 
 const MapEvents = ({ onMapClick }: { onMapClick: (latlng: L.LatLng) => void }) => {
@@ -54,6 +53,78 @@ const MapEvents = ({ onMapClick }: { onMapClick: (latlng: L.LatLng) => void }) =
       onMapClick(e.latlng);
     },
   });
+  return null;
+};
+
+// Coordinate conversion for China (WGS-84 to GCJ-02)
+const WGS84_TO_GCJ02 = {
+  a: 6378245.0,
+  ee: 0.00669342162296594323,
+  transformLat: (x: number, y: number) => {
+    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin(y / 3.0 * Math.PI)) * 2.0 / 3.0;
+    ret += (160.0 * Math.sin(y / 12.0 * Math.PI) + 320 * Math.sin(y * Math.PI / 30.0)) * 2.0 / 3.0;
+    return ret;
+  },
+  transformLng: (x: number, y: number) => {
+    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin(x / 3.0 * Math.PI)) * 2.0 / 3.0;
+    ret += (150.0 * Math.sin(x / 12.0 * Math.PI) + 300.0 * Math.sin(x / 30.0 * Math.PI)) * 2.0 / 3.0;
+    return ret;
+  },
+  outOfChina: (lat: number, lng: number) => {
+    if (lng < 72.004 || lng > 137.8347) return true;
+    if (lat < 0.8293 || lat > 55.8271) return true;
+    return false;
+  },
+  convert: (lat: number, lng: number): [number, number] => {
+    if (WGS84_TO_GCJ02.outOfChina(lat, lng)) return [lat, lng];
+    let dLat = WGS84_TO_GCJ02.transformLat(lng - 105.0, lat - 35.0);
+    let dLng = WGS84_TO_GCJ02.transformLng(lng - 105.0, lat - 35.0);
+    const radLat = lat / 180.0 * Math.PI;
+    let magic = Math.sin(radLat);
+    magic = 1 - WGS84_TO_GCJ02.ee * magic * magic;
+    const sqrtMagic = Math.sqrt(magic);
+    dLat = (dLat * 180.0) / ((WGS84_TO_GCJ02.a * (1 - WGS84_TO_GCJ02.ee)) / (magic * sqrtMagic) * Math.PI);
+    dLng = (dLng * 180.0) / (WGS84_TO_GCJ02.a / sqrtMagic * Math.cos(radLat) * Math.PI);
+    return [lat + dLat, lng + dLng];
+  },
+  invert: (lat: number, lng: number): [number, number] => {
+    if (WGS84_TO_GCJ02.outOfChina(lat, lng)) return [lat, lng];
+    let dLat = WGS84_TO_GCJ02.transformLat(lng - 105.0, lat - 35.0);
+    let dLng = WGS84_TO_GCJ02.transformLng(lng - 105.0, lat - 35.0);
+    const radLat = lat / 180.0 * Math.PI;
+    let magic = Math.sin(radLat);
+    magic = 1 - WGS84_TO_GCJ02.ee * magic * magic;
+    const sqrtMagic = Math.sqrt(magic);
+    dLat = (dLat * 180.0) / ((WGS84_TO_GCJ02.a * (1 - WGS84_TO_GCJ02.ee)) / (magic * sqrtMagic) * Math.PI);
+    dLng = (dLng * 180.0) / (WGS84_TO_GCJ02.a / sqrtMagic * Math.cos(radLat) * Math.PI);
+    return [lat - dLat, lng - dLng];
+  }
+};
+
+// Headless component to handle map location logic
+const LocateTrigger = ({ trigger, onLocate }: { trigger: number; onLocate: (latlng: L.LatLng) => void }) => {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (trigger > 0) {
+      map.locate({ setView: true, maxZoom: 16 });
+    }
+  }, [trigger, map]);
+
+  useMapEvents({
+    locationfound(e) {
+      onLocate(e.latlng);
+      map.flyTo(e.latlng, 16);
+    },
+    locationerror() {
+      alert("无法获取您的位置，请检查浏览器权限设置。");
+    }
+  });
+
   return null;
 };
 
@@ -68,49 +139,19 @@ const FitBounds = ({ points }: { points: [number, number][] }) => {
   return null;
 };
 
-const LocateControl = ({ onLocate }: { onLocate: (latlng: L.LatLng) => void }) => {
-  const map = useMap();
-  
-  const handleLocate = useCallback(() => {
-    map.locate({ setView: true, maxZoom: 16 });
-  }, [map]);
-
-  useMapEvents({
-    locationfound(e) {
-      onLocate(e.latlng);
-      map.flyTo(e.latlng, 16);
-    },
-    locationerror(e) {
-      alert("无法获取您的位置，请检查浏览器权限设置。");
-    }
-  });
-
-  return (
-    <div className="absolute top-4 right-4 z-[1000]">
-      <button
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          handleLocate();
-        }}
-        className="bg-white p-3 rounded-full shadow-xl hover:bg-stone-50 transition-all active:scale-95 flex items-center justify-center border border-stone-100"
-        title="定位我的位置"
-      >
-        <Crosshair className="w-6 h-6 text-emerald-600" />
-      </button>
-    </div>
-  );
-};
 
 export default function App() {
   const [startPoint, setStartPoint] = useState<L.LatLng | null>(null);
   const [endPoint, setEndPoint] = useState<L.LatLng | null>(null);
   const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
+  const [locateTrigger, setLocateTrigger] = useState(0);
   const [route, setRoute] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [profile, setProfile] = useState<'bicycle' | 'foot'>('bicycle');
+  const [profile] = useState<'bicycle'>('bicycle');
   const [lastSyncedData, setLastSyncedData] = useState<any>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [isCalculated, setIsCalculated] = useState(false);
 
   // Initial location attempt
   useEffect(() => {
@@ -128,10 +169,14 @@ export default function App() {
   }, []);
 
   const handleMapClick = (latlng: L.LatLng) => {
+    // Convert click (GCJ-02) back to WGS-84 for OSRM
+    const [wgsLat, wgsLng] = WGS84_TO_GCJ02.invert(latlng.lat, latlng.lng);
+    const wgsCoords = new L.LatLng(wgsLat, wgsLng);
+    
     if (!startPoint) {
-      setStartPoint(latlng);
+      setStartPoint(wgsCoords);
     } else if (!endPoint) {
-      setEndPoint(latlng);
+      setEndPoint(wgsCoords);
     }
   };
 
@@ -140,6 +185,7 @@ export default function App() {
     setEndPoint(null);
     setRoute(null);
     setError(null);
+    setIsCalculated(false);
   };
 
   const swapPoints = () => {
@@ -188,19 +234,31 @@ export default function App() {
     if (!route) return;
     setSyncing(true);
     try {
-      // 精简数据给 ESP32
+      // 精简数据给 ESP32，使用短键和英文指令
       const deviceData = {
-        distance: route.distance,
-        duration: route.duration,
-        maxGrade: route.maxGrade,
-        // 关键点：每隔 5 个点取一个，或者只取转弯点，减少 ESP32 内存压力
-        points: route.coordinates.filter((_, i) => i % 3 === 0), 
-        steps: route.steps.map(s => ({
-          instruction: s.instruction,
-          dist: s.distance,
-          loc: s.maneuver.location,
-          alert: s.alert
-        }))
+        dst: Math.round(route.distance),
+        dur: Math.round(route.duration),
+        pts: route.coordinates.filter((_, i) => i % 5 === 0).map(c => [
+          parseFloat(c[0].toFixed(5)), 
+          parseFloat(c[1].toFixed(5))
+        ]), 
+        steps: route.steps.map(s => {
+          let inst = s.instruction;
+          // 将中文指令映射为简短的英文指令
+          if (inst.includes('左转')) inst = 'L';
+          else if (inst.includes('右转')) inst = 'R';
+          else if (inst.includes('直行') || inst.includes('前行')) inst = 'S';
+          else if (inst.includes('调头')) inst = 'U';
+          else if (inst.includes('起点')) inst = 'Start';
+          else if (inst.includes('终点')) inst = 'End';
+          else inst = 'Go';
+
+          return {
+            i: inst,
+            d: Math.round(s.distance),
+            l: s.maneuver.location.map(n => parseFloat(n.toFixed(5)))
+          };
+        })
       };
 
       const res = await fetch('/api/sync-route', {
@@ -226,9 +284,9 @@ export default function App() {
 
     setLoading(true);
     setError(null);
+    setIsCalculated(true);
     try {
-      // OSRM profiles: bicycle, car, foot
-      const osrmProfile = profile === 'car' ? 'driving' : profile;
+      const osrmProfile = profile;
       const response = await fetch(
         `https://router.project-osrm.org/route/v1/${osrmProfile}/${startPoint.lng},${startPoint.lat};${endPoint.lng},${endPoint.lat}?overview=full&geometries=geojson&steps=true`
       );
@@ -388,8 +446,7 @@ export default function App() {
           steps,
           calories,
           co2Saved,
-          elevations: elevationProfile,
-          maxGrade
+          elevations: elevationProfile
         });
       } catch (e) {
         console.error("Elevation fetch failed:", e);
@@ -402,11 +459,7 @@ export default function App() {
     }
   }, [startPoint, endPoint, profile]);
 
-  useEffect(() => {
-    if (startPoint && endPoint) {
-      fetchRoute();
-    }
-  }, [startPoint, endPoint, fetchRoute, profile]);
+  // Manual route calculation triggered by button
 
   const formatDistance = (meters: number) => {
     if (meters < 1000) return `${Math.round(meters)}米`;
@@ -431,52 +484,59 @@ export default function App() {
   };
 
   return (
-    <div className="relative h-screen w-full bg-stone-100 font-sans overflow-hidden flex">
+    <div className="relative h-screen w-full bg-stone-100 font-sans overflow-hidden flex flex-col md:flex-row">
+      {/* Sidebar Toggle Button (Mobile) */}
+      <button 
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="fixed bottom-6 right-6 z-[2000] md:hidden w-12 h-12 bg-stone-900 text-white rounded-full shadow-2xl flex items-center justify-center transition-all active:scale-90"
+      >
+        {sidebarOpen ? <ChevronRight className="w-6 h-6 rotate-90" /> : <Navigation className="w-6 h-6" />}
+      </button>
+
       {/* Sidebar */}
-      <div className="w-80 h-full bg-white border-r border-stone-200 flex flex-col z-20 shadow-xl">
-        <div className="p-6 border-b border-stone-100">
-          <div className="flex items-center gap-2 mb-2">
-            <Navigation className="w-6 h-6 text-emerald-600" />
-            <h1 className="text-xl font-bold text-stone-900 tracking-tight">智能骑行导航</h1>
+      <div className={cn(
+        "bg-white border-stone-200 flex flex-col z-20 shadow-xl transition-all duration-300 ease-in-out shrink-0",
+        sidebarOpen 
+          ? "w-full md:w-72 h-1/2 md:h-full opacity-100 translate-y-0 md:translate-x-0" 
+          : "w-full md:w-0 h-0 md:h-full opacity-0 translate-y-full md:-translate-x-full"
+      )}>
+        <div className="p-4 border-b border-stone-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Navigation className="w-5 h-5 text-emerald-600" />
+            <h1 className="text-lg font-bold text-stone-900 tracking-tight">多功能骑行头盔</h1>
           </div>
-          <p className="text-sm text-stone-500">点击地图选择起点和终点</p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setLocateTrigger(prev => prev + 1)}
+              className="p-1.5 bg-stone-50 hover:bg-stone-100 text-stone-500 rounded-md transition-all active:scale-95 border border-stone-100"
+              title="定位"
+            >
+              <Crosshair className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="p-1.5 bg-stone-50 hover:bg-red-50 text-stone-400 hover:text-red-500 rounded-md transition-all active:scale-95 border border-stone-100 md:hidden"
+            >
+              <ChevronRight className="w-3.5 h-3.5 rotate-90" />
+            </button>
+          </div>
         </div>
 
-        <div className="px-4 py-3 border-b border-stone-100 bg-stone-50/30">
-          <div className="flex p-1 bg-stone-100 rounded-lg">
-            {(['bicycle', 'foot'] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => setProfile(p)}
-                className={cn(
-                  "flex-1 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-md transition-all",
-                  profile === p 
-                    ? "bg-white text-emerald-600 shadow-sm" 
-                    : "text-stone-400 hover:text-stone-600"
-                )}
-              >
-                {p === 'bicycle' ? '骑行' : '步行'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Status Cards */}
-          <div className="space-y-3 relative">
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {/* Status Cards - More Compact */}
+          <div className="space-y-2 relative">
             <div className={cn(
-              "p-4 rounded-xl border transition-all",
-              startPoint ? "bg-emerald-50 border-emerald-200" : "bg-stone-50 border-stone-200"
+              "p-3 rounded-lg border transition-all",
+              startPoint ? "bg-emerald-50 border-emerald-100" : "bg-stone-50 border-stone-100"
             )}>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <div className={cn(
-                  "w-8 h-8 rounded-full flex items-center justify-center text-white font-bold",
+                  "w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold",
                   startPoint ? "bg-emerald-500" : "bg-stone-300"
-                )}>A</div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">起点</p>
-                  <p className="text-sm font-medium text-stone-700 truncate">
-                    {startPoint ? `${startPoint.lat.toFixed(4)}, ${startPoint.lng.toFixed(4)}` : "等待选择..."}
+                )}>起</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-medium text-stone-600 truncate">
+                    {startPoint ? `${startPoint.lat.toFixed(5)}, ${startPoint.lng.toFixed(5)}` : "选择起点"}
                   </p>
                 </div>
               </div>
@@ -484,35 +544,45 @@ export default function App() {
 
             <button 
               onClick={swapPoints}
-              className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 z-10 p-2 bg-white border border-stone-200 rounded-full shadow-md hover:bg-emerald-50 hover:border-emerald-200 transition-all active:scale-90"
-              title="切换起点终点"
+              className="absolute right-3 top-1/2 -translate-y-1/2 z-10 p-1 bg-white border border-stone-200 rounded-md shadow-sm hover:bg-emerald-50 transition-all"
+              title="切换"
             >
-              <ArrowUpDown className="w-4 h-4 text-emerald-600" />
+              <ArrowUpDown className="w-3 h-3 text-emerald-600" />
             </button>
 
             <div className={cn(
-              "p-4 rounded-xl border transition-all",
-              endPoint ? "bg-blue-50 border-blue-200" : "bg-stone-50 border-stone-200"
+              "p-3 rounded-lg border transition-all",
+              endPoint ? "bg-blue-50 border-blue-100" : "bg-stone-50 border-stone-100"
             )}>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <div className={cn(
-                  "w-8 h-8 rounded-full flex items-center justify-center text-white font-bold",
+                  "w-6 h-6 rounded-md flex items-center justify-center text-white text-[10px] font-bold",
                   endPoint ? "bg-blue-500" : "bg-stone-300"
-                )}>B</div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">终点</p>
-                  <p className="text-sm font-medium text-stone-700 truncate">
-                    {endPoint ? `${endPoint.lat.toFixed(4)}, ${endPoint.lng.toFixed(4)}` : "等待选择..."}
+                )}>终</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-medium text-stone-600 truncate">
+                    {endPoint ? `${endPoint.lat.toFixed(5)}, ${endPoint.lng.toFixed(5)}` : "选择终点"}
                   </p>
                 </div>
               </div>
             </div>
           </div>
 
+          {!isCalculated && startPoint && endPoint && (
+            <button
+              onClick={fetchRoute}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold transition-all shadow-md active:scale-95"
+            >
+              {loading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Navigation className="w-4 h-4" />}
+              开始计算路径
+            </button>
+          )}
+
           {loading && (
-            <div className="flex flex-col items-center justify-center py-12 text-stone-400">
-              <div className="w-8 h-8 border-4 border-stone-200 border-t-emerald-500 rounded-full animate-spin mb-4" />
-              <p className="text-sm">正在规划最优路径...</p>
+            <div className="flex flex-col items-center justify-center py-6 text-stone-400">
+              <div className="w-6 h-6 border-3 border-stone-100 border-t-emerald-500 rounded-full animate-spin mb-2" />
+              <p className="text-[10px]">规划中...</p>
             </div>
           )}
 
@@ -538,7 +608,7 @@ export default function App() {
               <div className="space-y-2">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-stone-400">轨迹点数</span>
-                  <span className="text-white font-mono">{lastSyncedData.points.length}</span>
+                  <span className="text-white font-mono">{lastSyncedData.pts.length}</span>
                 </div>
                 <div className="flex justify-between text-[10px]">
                   <span className="text-stone-400">导航步骤</span>
@@ -565,41 +635,34 @@ export default function App() {
 
           {route && !loading && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 bg-stone-50 rounded-xl border border-stone-100">
-                  <div className="flex items-center gap-2 text-stone-400 mb-1">
-                    <MapIcon className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">距离</span>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2 bg-stone-50 rounded-lg border border-stone-100">
+                  <div className="flex items-center gap-1.5 text-stone-400 mb-0.5">
+                    <MapIcon className="w-3 h-3" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest">距离</span>
                   </div>
-                  <p className="text-lg font-bold text-stone-800">{formatDistance(route.distance)}</p>
+                  <p className="text-sm font-bold text-stone-800">{formatDistance(route.distance)}</p>
                 </div>
-                <div className="p-3 bg-stone-50 rounded-xl border border-stone-100">
-                  <div className="flex items-center gap-2 text-stone-400 mb-1">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">预计用时</span>
+                <div className="p-2 bg-stone-50 rounded-lg border border-stone-100">
+                  <div className="flex items-center gap-1.5 text-stone-400 mb-0.5">
+                    <Clock className="w-3 h-3" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest">时间</span>
                   </div>
-                  <p className="text-lg font-bold text-stone-800">{formatDuration(route.duration)}</p>
+                  <p className="text-sm font-bold text-stone-800">{formatDuration(route.duration)}</p>
                 </div>
-                <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100/50">
-                  <div className="flex items-center gap-2 text-emerald-600/60 mb-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">消耗热量</span>
+                <div className="p-2 bg-blue-50/50 rounded-lg border border-blue-100/50">
+                  <div className="flex items-center gap-1.5 text-blue-600/60 mb-0.5">
+                    <div className="w-1 h-1 rounded-full bg-blue-500" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest">CO₂</span>
                   </div>
-                  <p className="text-lg font-bold text-emerald-700">{route.calories} kcal</p>
+                  <p className="text-sm font-bold text-blue-700">{route.co2Saved} kg</p>
                 </div>
-                <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-100/50">
-                  <div className="flex items-center gap-2 text-blue-600/60 mb-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">减排 CO₂</span>
+                <div className="p-2 bg-emerald-50/50 rounded-lg border border-emerald-100/50">
+                  <div className="flex items-center gap-1.5 text-emerald-600/60 mb-0.5">
+                    <div className="w-1 h-1 rounded-full bg-emerald-500" />
+                    <span className="text-[9px] font-bold uppercase tracking-widest">热量</span>
                   </div>
-                  <p className="text-lg font-bold text-blue-700">{route.co2Saved} kg</p>
-                </div>
-                <div className="p-3 bg-orange-50/50 rounded-xl border border-orange-100/50">
-                  <div className="flex items-center gap-2 text-orange-600/60 mb-1">
-                    <TrendingUp className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">最大坡度</span>
-                  </div>
-                  <p className="text-lg font-bold text-orange-700">{Math.abs(route.maxGrade).toFixed(1)}%</p>
+                  <p className="text-sm font-bold text-emerald-700">{route.calories} kcal</p>
                 </div>
               </div>
 
@@ -675,37 +738,41 @@ export default function App() {
           )}
         </div>
 
-        <div className="p-4 border-t border-stone-100 bg-stone-50/50 space-y-2">
+        <div className="p-3 border-t border-stone-100 bg-stone-50/50 space-y-2">
           {route && (
             <button
               onClick={syncToDevice}
               disabled={syncing}
               className={cn(
-                "w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl font-bold transition-all shadow-lg active:scale-[0.98]",
+                "w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-bold transition-all shadow-md active:scale-[0.98]",
                 syncSuccess 
                   ? "bg-emerald-500 text-white" 
                   : "bg-stone-900 hover:bg-stone-800 text-white"
               )}
             >
-              {syncing ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : syncSuccess ? (
-                <CheckCircle2 className="w-4 h-4" />
-              ) : (
-                <Cpu className="w-4 h-4" />
-              )}
-              {syncSuccess ? "已同步到云端" : "同步到 ESP32"}
+              <Cpu className="w-3.5 h-3.5" />
+              <span className="text-xs">{syncSuccess ? "已同步到云端" : "同步到 ESP32"}</span>
             </button>
           )}
           <button
             onClick={reset}
-            className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white border border-stone-200 hover:bg-stone-50 text-stone-600 rounded-xl font-semibold transition-all active:scale-[0.98]"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white border border-stone-200 hover:bg-stone-50 text-stone-600 rounded-lg font-bold text-xs transition-all active:scale-[0.98]"
           >
-            <RotateCcw className="w-4 h-4" />
-            重置地图
+            <RotateCcw className="w-3 h-3" />
+            重置
           </button>
         </div>
       </div>
+
+      {/* Desktop Sidebar Pull-out Handle */}
+      {!sidebarOpen && (
+        <button 
+          onClick={() => setSidebarOpen(true)}
+          className="fixed left-0 top-1/2 -translate-y-1/2 z-30 bg-white border border-l-0 border-stone-200 p-2 rounded-r-xl shadow-lg text-stone-400 hover:text-emerald-500 transition-all hidden md:block"
+        >
+          <ChevronRight className="w-5 h-5" />
+        </button>
+      )}
 
       {/* Map Container */}
       <div className="flex-1 relative z-10">
@@ -716,17 +783,17 @@ export default function App() {
           zoomControl={false}
         >
           <TileLayer
-            attribution='&copy; <a href="https://amap.com/">高德地图</a>'
+            attribution='&copy; <a href="http://www.amap.com/">Amap</a>'
             url="http://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
-            subdomains={['1', '2', '3', '4']}
+            subdomains="1234"
           />
           
           <MapEvents onMapClick={handleMapClick} />
-          <LocateControl onLocate={setUserLocation} />
+          <LocateTrigger trigger={locateTrigger} onLocate={setUserLocation} />
           
           {userLocation && (
             <Marker 
-              position={userLocation}
+              position={WGS84_TO_GCJ02.convert(userLocation.lat, userLocation.lng)}
               icon={L.divIcon({
                 className: 'bg-transparent',
                 html: `<div class="relative">
@@ -742,13 +809,13 @@ export default function App() {
           )}
 
           {startPoint && (
-            <Marker position={startPoint}>
+            <Marker position={WGS84_TO_GCJ02.convert(startPoint.lat, startPoint.lng)}>
               <Popup>起点</Popup>
             </Marker>
           )}
           
           {endPoint && (
-            <Marker position={endPoint}>
+            <Marker position={WGS84_TO_GCJ02.convert(endPoint.lat, endPoint.lng)}>
               <Popup>终点</Popup>
             </Marker>
           )}
@@ -757,7 +824,7 @@ export default function App() {
             <>
               {/* 路线主体 */}
               <Polyline 
-                positions={route.coordinates} 
+                positions={route.coordinates.map(coord => WGS84_TO_GCJ02.convert(coord[0], coord[1]))} 
                 color="#10b981" 
                 weight={6} 
                 opacity={0.8}
@@ -765,7 +832,7 @@ export default function App() {
                 className="route-line-animated"
               />
 
-              <FitBounds points={route.coordinates} />
+              <FitBounds points={route.coordinates.map(coord => WGS84_TO_GCJ02.convert(coord[0], coord[1]))} />
             </>
           )}
         </MapContainer>
