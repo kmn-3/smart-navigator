@@ -1,5 +1,5 @@
 {
-  "name": "Smart Navigator",
-  "description": "A simple map application that allows users to click two points to generate a route and navigation instructions.",
+  "name": "多功能骑行头盔",
+  "description": "专为多功能骑行头盔设计的智能导航系统，支持高精度坡度分析与硬件同步。",
   "requestFramePermissions": ["geolocation"]
 }

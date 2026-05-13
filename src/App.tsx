@@ -234,17 +234,58 @@ export default function App() {
     if (!route) return;
     setSyncing(true);
     try {
-      // 精简数据给 ESP32，使用短键和英文指令
+      const coordinates = route.coordinates; // [[lat, lng], ...]
+      const steps = route.steps;
+
+      // 1. 提取所有导航关键点在主路径中的索引
+      const maneuvers = steps.map(s => {
+        const mLng = s.maneuver.location[0];
+        const mLat = s.maneuver.location[1];
+        // 查找该点在主路径中的索引
+        return coordinates.findIndex(c => Math.abs(c[0] - mLat) < 0.0001 && Math.abs(c[1] - mLng) < 0.0001);
+      }).filter(idx => idx !== -1);
+
+      // 2. 计算每个拐点前约 100 米的预警点索引
+      const alertIndices: number[] = [];
+      maneuvers.forEach(mIdx => {
+        if (mIdx <= 0) return;
+        let distSum = 0;
+        let j = mIdx;
+        while (j > 0 && distSum < 100) {
+          const p1 = L.latLng(coordinates[j][0], coordinates[j][1]);
+          const p2 = L.latLng(coordinates[j-1][0], coordinates[j-1][1]);
+          distSum += p1.distanceTo(p2);
+          j--;
+        }
+        alertIndices.push(j);
+      });
+
+      // 3. 构建同步点集合 (确保包含起点、终点、拐点、预警点)
+      const criticalIndices = new Set<number>();
+      criticalIndices.add(0); // 起点
+      criticalIndices.add(coordinates.length - 1); // 终点
+      maneuvers.forEach(i => criticalIndices.add(i)); 
+      alertIndices.forEach(i => criticalIndices.add(i));
+      
+      // 4. 补充采样点以保证路径连贯 (每10个点采样一次)
+      for(let i = 0; i < coordinates.length; i += 10) {
+        criticalIndices.add(i);
+      }
+
+      // 5. 排序并生成最终坐标列表
+      const sortedIndices = Array.from(criticalIndices).sort((a, b) => a - b);
+      const finalPts = sortedIndices.map(idx => [
+        parseFloat(coordinates[idx][0].toFixed(5)),
+        parseFloat(coordinates[idx][1].toFixed(5))
+      ]);
+
       const deviceData = {
         dst: Math.round(route.distance),
         dur: Math.round(route.duration),
-        pts: route.coordinates.filter((_, i) => i % 5 === 0).map(c => [
-          parseFloat(c[0].toFixed(5)), 
-          parseFloat(c[1].toFixed(5))
-        ]), 
-        steps: route.steps.map(s => {
+        pts: finalPts,
+        steps: steps.map(s => {
           let inst = s.instruction;
-          // 将中文指令映射为简短的英文指令
+          // 简短指令映射
           if (inst.includes('左转')) inst = 'L';
           else if (inst.includes('右转')) inst = 'R';
           else if (inst.includes('直行') || inst.includes('前行')) inst = 'S';
@@ -256,7 +297,8 @@ export default function App() {
           return {
             i: inst,
             d: Math.round(s.distance),
-            l: s.maneuver.location.map(n => parseFloat(n.toFixed(5)))
+            // 发送给 ESP32 的坐标统一为 [lat, lng]
+            l: [parseFloat(s.maneuver.location[1].toFixed(5)), parseFloat(s.maneuver.location[0].toFixed(5))]
           };
         })
       };
