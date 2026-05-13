@@ -284,18 +284,26 @@ export default function App() {
         dur: Math.round(route.duration),
         pts: finalPts,
         steps: steps.map(s => {
-          let inst = s.instruction;
-          // 简短指令映射
-          if (inst.includes('左转')) inst = 'L';
-          else if (inst.includes('右转')) inst = 'R';
-          else if (inst.includes('直行') || inst.includes('前行')) inst = 'S';
-          else if (inst.includes('调头')) inst = 'U';
-          else if (inst.includes('起点')) inst = 'Start';
-          else if (inst.includes('终点')) inst = 'End';
-          else inst = 'Go';
+          const instText = s.instruction.toLowerCase();
+          const modifier = (s.maneuver?.modifier || '').toLowerCase();
+          let code = 'S'; // Default: Straight / Start / Other
+
+          // Priority 1: Check OSRM modifier (more reliable)
+          if (modifier.includes('uturn')) code = 'U';
+          else if (modifier.includes('left')) code = 'L';
+          else if (modifier.includes('right')) code = 'R';
+          else if (modifier.includes('arrive') || s.maneuver?.type === 'arrive') code = 'E';
+          
+          // Priority 2: Keywords in instruction text (for redundancy/custom instructions)
+          if (code === 'S') {
+            if (instText.includes('左转') || instText.includes('turn left')) code = 'L';
+            else if (instText.includes('右转') || instText.includes('turn right')) code = 'R';
+            else if (instText.includes('调头') || instText.includes('u-turn') || instText.includes('uturn')) code = 'U';
+            else if (instText.includes('终点') || instText.includes('destination') || instText.includes('arrive')) code = 'E';
+          }
 
           return {
-            i: inst,
+            i: code,
             d: Math.round(s.distance),
             // 发送给 ESP32 的坐标统一为 [lat, lng]
             l: [parseFloat(s.maneuver.location[1].toFixed(5)), parseFloat(s.maneuver.location[0].toFixed(5))]
